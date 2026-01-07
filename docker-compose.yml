@@ -1,0 +1,211 @@
+name: microservices-dev-fqc
+
+services:
+  # BASES DE DATOS
+  # ==========================================================
+
+  # 1. DB User
+  postgres-user-dev:
+    image: postgres:15-alpine
+    ports:
+    - "5432:5432"
+    container_name: postgres-user-dev
+
+    environment:
+      POSTGRES_DB: userdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres-user-dev-data:/var/lib/postgresql/data
+    networks:
+      - microservice-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d userdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # 2. DB Product
+  postgres-product-dev:
+    image: postgres:15-alpine
+    ports:
+    - "5433:5432"
+    container_name: postgres-product-dev
+    environment:
+      POSTGRES_DB: productdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres-product-dev-data:/var/lib/postgresql/data
+    networks:
+      - microservice-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d productdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # 3. DB Order
+  postgres-order-dev:
+    image: postgres:15-alpine
+    ports:
+    - "5434:5432"
+    container_name: postgres-order-dev
+    environment:
+      POSTGRES_DB: orderdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres-order-dev-data:/var/lib/postgresql/data
+    networks:
+      - microservice-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d orderdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # 4. DB Auth
+  postgres-auth-dev:
+    image: postgres:15-alpine
+    ports:
+      - "5435:5432" # Siguiente puerto disponible
+    container_name: postgres-auth-dev
+    environment:
+      POSTGRES_DB: auth_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres-auth-dev-data:/var/lib/postgresql/data
+    networks:
+      - microservice-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d auth_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # MICROSERVICIOS
+  # ==========================================================
+
+  #  User Service Dev
+  user-service-dev:
+    image: francoqueirolo/user-service:1.0.0-dev
+    build:
+      context: ../m6-sbp-c05-micro-user-service
+      dockerfile: Dockerfile
+    container_name: user-service-dev
+    ports:
+      - "8081:8081"
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+      - SPRING_APPLICATION_NAME=user-service
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-user-dev:5432/userdb
+      - SPRING_DATASOURCE_USERNAME=postgres
+      - SPRING_DATASOURCE_PASSWORD=postgres
+    depends_on:
+      postgres-user-dev:
+        condition: service_healthy
+    networks:
+      - microservice-network
+    restart: unless-stopped
+
+  #  Product Service Dev
+  product-service-dev:
+    image: francoqueirolo/product-service:1.0.0-dev
+    build:
+      context: ../m6-sbp-c05-micro-product-service
+      dockerfile: Dockerfile
+    container_name: product-service-dev
+    ports:
+      - "8082:8082"
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+      - SPRING_APPLICATION_NAME=product-service
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-product-dev:5432/productdb
+      - SPRING_DATASOURCE_USERNAME=postgres
+      - SPRING_DATASOURCE_PASSWORD=postgres
+        # URLs para comunicación entre MS
+      - USER_SERVICE_URL=http://user-service-dev:8081
+    depends_on:
+      postgres-product-dev:
+        condition: service_healthy
+      user-service-dev:
+        condition: service_started # Product usa User
+    networks:
+      - microservice-network
+    restart: unless-stopped
+
+  # 3. Order Service
+  order-service-dev:
+    image: francoqueirolo/order-service:1.0.0-dev
+    build:
+      context: ../m6-sbp-c05-micro-order-service
+      dockerfile: Dockerfile
+    container_name: order-service-dev
+    ports:
+      - "8083:8083"
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+      - SPRING_APPLICATION_NAME=order-service
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-order-dev:5432/orderdb
+      - SPRING_DATASOURCE_USERNAME=postgres
+      - SPRING_DATASOURCE_PASSWORD=postgres
+      # URLs para comunicación entre MS
+      - USER_SERVICE_URL=http://user-service-dev:8081
+      - PRODUCT_SERVICE_URL=http://product-service-dev:8082
+    depends_on:
+      postgres-order-dev:
+        condition: service_healthy
+      user-service-dev:
+        condition: service_started # Order usa User
+      product-service-dev:
+        condition: service_started # Order usa Product
+    networks:
+      - microservice-network
+    restart: unless-stopped
+
+  # Auth Service Dev
+  auth-service-dev:
+    image: francoqueirolo/auth-service:1.0.0-dev
+    build:
+      context: ../auth-service # Ajusta si el nombre de tu carpeta es distinto
+      dockerfile: Dockerfile
+    container_name: auth-service-dev
+    ports:
+      - "9000:9000"
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+      - SPRING_APPLICATION_NAME=auth-service
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-auth-dev:5432/auth_db
+      - SPRING_DATASOURCE_USERNAME=postgres
+      - SPRING_DATASOURCE_PASSWORD=postgres
+      - JWT_SECRET=5367566B59703373367639792F423F4528482B4D6251655468576D5A71347437
+      - JWT_EXPIRATION=3600000
+    depends_on:
+      postgres-auth-dev:
+        condition: service_healthy
+    networks:
+      - microservice-network
+    restart: unless-stopped
+
+# REDES Y VOLÚMENES
+# ==========================================================
+
+networks:
+  microservice-network:
+    driver: bridge
+
+volumes:
+  postgres-user-dev-data:
+    driver: local
+  postgres-product-dev-data:
+    driver: local
+  postgres-order-dev-data:
+    driver: local
+  postgres-auth-dev-data:
+    driver: local
